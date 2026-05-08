@@ -2,7 +2,7 @@
 
 Opensource cross-platform tool written in vulkan compute to stress test video memory for stability during overclocking or repair.
 
-Just start application, wait at least 6 minutes and stop testing by Ctrl+C. Detected errors are displayed immediately during test run.
+Just start application, choose the number of iterations (10 by default) and whether to stop on first error (`[x]` by default). Detected errors are displayed immediately during test run.
 
 Requires system-provided vulkan loader and driver supporting Vulkan 1.1 (already installed with graphics drivers on most OS).
 
