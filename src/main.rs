@@ -21,7 +21,7 @@ use std::{
     fmt,
     io::Write,
     mem,
-    sync::atomic::{AtomicBool, AtomicI64, AtomicIsize, Ordering::SeqCst},
+    sync::atomic::{AtomicBool, AtomicI64, AtomicIsize, AtomicU32, Ordering::SeqCst},
     time,
 };
 
@@ -1020,9 +1020,9 @@ fn test_device<Writer: std::io::Write>(
     // allow write bugs emulation for testing purposes
     let emulate_write_bugs_iteration = env::var("MEMTEST_VULKAN_EMULATE_WRITE_BUG_ITERATION")
         .ok()
-        .and_then(|s| s.parse::<i32>().ok())
+        .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or_default();
-    let iter_count = 100000000; //by default exit after several days of testing
+    let iter_count = env.iteration_limit.load(SeqCst);
     let mut written_bytes = 0i64;
     let mut read_bytes = 0i64;
     let mut next_report_duration = time::Duration::from_secs(0);
@@ -1033,7 +1033,7 @@ fn test_device<Writer: std::io::Write>(
     let first_iter_start = time::Instant::now();
     let mut last_status_output = first_iter_start;
     let mut last_error_state = "          NO ERRORS       ".to_owned();
-    for iteration in 1..=iter_count {
+    'testing: for iteration in 1..=iter_count {
         unsafe { std::ptr::write(mapped, buffer_in) }
         let write_start = time::Instant::now();
         for window_idx in 1..test_window_count {
@@ -1098,6 +1098,10 @@ fn test_device<Writer: std::io::Write>(
                         "  iteration:{}\n{}",
                         last_buffer_out.iter, last_buffer_out
                     )?;
+                    if env.stop_on_error.load(SeqCst) {
+                        let _ = writeln!(log_dupler, "stop on error requested, testing stopped");
+                        break 'testing;
+                    }
                 }
                 last_buffer_out.check_vec_first()?;
             }
@@ -1587,6 +1591,51 @@ fn prompt_for_label(verbose: bool) -> Option<isize> {
     drop(input_reader);
     device_test_index
 }
+
+fn prompt_for_u32_with_default(prompt: &str, default_value: u32, verbose: bool) -> Option<u32> {
+    let mut input_reader = input::Reader::default();
+    let result = loop {
+        match input_reader.input_digit_step(prompt, &time::Duration::from_millis(250)) {
+            Ok(input::ReaderEvent::Edited) | Ok(input::ReaderEvent::Timeout) => continue,
+            Ok(input::ReaderEvent::Canceled) => {
+                println!();
+                break None;
+            }
+            Ok(input::ReaderEvent::Completed) => {
+                println!();
+                let parsed = match input_reader.current_input.parse::<u32>() {
+                    Ok(parsed) if parsed > 0 => parsed,
+                    _ => default_value,
+                };
+                break Some(parsed);
+            }
+            Err(e) => {
+                if verbose {
+                    println!("Input machinery failure: {e}");
+                }
+                break Some(default_value);
+            }
+        }
+    };
+    drop(input_reader);
+    result
+}
+
+fn prompt_for_stop_on_error_checkbox(default_enabled: bool, verbose: bool) -> Option<bool> {
+    let default_num = u32::from(default_enabled);
+    let prompt_enabled = "(1/0)  [x] Stop on first error:";
+    let prompt_disabled = "(1/0)  [ ] Stop on first error:";
+    prompt_for_u32_with_default(
+        if default_enabled {
+            prompt_enabled
+        } else {
+            prompt_disabled
+        },
+        default_num,
+        verbose,
+    )
+    .map(|v| v != 0)
+}
 struct TestStatus {
     test_status: u8,
 }
@@ -1618,6 +1667,22 @@ fn test_selected_label<Writer: std::io::Write>(
     match loaded_devices.devices.as_slice() {
         [single_dev] => {
             if env.interactive {
+                if let Some(iteration_limit) = prompt_for_u32_with_default(
+                    "                                       Number of iterations [10 by default]:",
+                    env.iteration_limit.load(SeqCst),
+                    env.verbose(),
+                ) {
+                    env.iteration_limit.store(iteration_limit, SeqCst);
+                } else {
+                    return Err("Test cancelled while configuring number of iterations".into());
+                }
+                if let Some(stop_on_error) =
+                    prompt_for_stop_on_error_checkbox(env.stop_on_error.load(SeqCst), env.verbose())
+                {
+                    env.stop_on_error.store(stop_on_error, SeqCst);
+                } else {
+                    return Err("Test cancelled while configuring stop-on-error mode".into());
+                }
                 let mut mode;
                 let mut main_code: u8 = 0;
                 loop {
@@ -1626,6 +1691,8 @@ fn test_selected_label<Writer: std::io::Write>(
                         && let Ok(mut child) = std::process::Command::new(argv0)
                             .arg((-1 - (single_dev.index_in_device_iteration as isize)).to_string())
                             .arg(env.max_test_bytes.load(SeqCst).to_string())
+                            .arg(env.iteration_limit.load(SeqCst).to_string())
+                            .arg(u8::from(env.stop_on_error.load(SeqCst)).to_string())
                             .spawn()
                     {
                         if env.verbose() {
@@ -1786,13 +1853,28 @@ fn init_vk_and_check_errors<Writer: std::io::Write>(
     test_selected_label(loaded_devices, env, log_dupler)
 }
 
-#[derive(Default)]
 struct ProcessEnv {
     argv0: Option<OsString>,
     device_label: AtomicIsize, //0 = autoselect, >0 index as displayed&sorted by memtest_vulkan, <0 -index as reported by device enumeration
     max_test_bytes: AtomicI64,
+    iteration_limit: AtomicU32,
+    stop_on_error: AtomicBool,
     verbose_requested: AtomicBool,
     interactive: bool,
+}
+
+impl Default for ProcessEnv {
+    fn default() -> Self {
+        Self {
+            argv0: None,
+            device_label: AtomicIsize::new(0),
+            max_test_bytes: AtomicI64::new(0),
+            iteration_limit: AtomicU32::new(10),
+            stop_on_error: AtomicBool::new(true),
+            verbose_requested: AtomicBool::new(false),
+            interactive: false,
+        }
+    }
 }
 
 impl ProcessEnv {
@@ -1863,6 +1945,31 @@ fn init_running_env() -> ProcessEnv {
                 && let Ok(mem_max_parsed) = argv2_mem_max_str.parse::<i64>()
             {
                 process_env.set_mem_budget_limit(mem_max_parsed);
+            }
+            if let Some(argv3_iteration_limit_str) = args_os_iter
+                .next()
+                .as_ref()
+                .and_then(|os_str| os_str.to_str())
+                && let Ok(iteration_limit_parsed) = argv3_iteration_limit_str.parse::<u32>()
+                && iteration_limit_parsed > 0
+            {
+                process_env
+                    .iteration_limit
+                    .store(iteration_limit_parsed, SeqCst);
+            }
+            if let Some(argv4_stop_on_error_str) = args_os_iter
+                .next()
+                .as_ref()
+                .and_then(|os_str| os_str.to_str())
+            {
+                let stop_on_error_parsed = match argv4_stop_on_error_str.to_ascii_lowercase() {
+                    v if ["0", "false", "off", "no", "n"].contains(&v.as_str()) => Some(false),
+                    v if ["1", "true", "on", "yes", "y"].contains(&v.as_str()) => Some(true),
+                    _ => None,
+                };
+                if let Some(parsed) = stop_on_error_parsed {
+                    process_env.stop_on_error.store(parsed, SeqCst);
+                }
             }
         }
     }
