@@ -1962,10 +1962,25 @@ fn init_running_env() -> ProcessEnv {
                 .as_ref()
                 .and_then(|os_str| os_str.to_str())
             {
-                let stop_on_error_parsed = match argv4_stop_on_error_str.to_ascii_lowercase() {
-                    v if ["0", "false", "off", "no", "n"].contains(&v.as_str()) => Some(false),
-                    v if ["1", "true", "on", "yes", "y"].contains(&v.as_str()) => Some(true),
-                    _ => None,
+                let stop_on_error_parsed = if matches!(argv4_stop_on_error_str, "0" | "1")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("false")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("off")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("no")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("n")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("true")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("on")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("yes")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("y")
+                {
+                    Some(
+                        matches!(argv4_stop_on_error_str, "1")
+                            || argv4_stop_on_error_str.eq_ignore_ascii_case("true")
+                            || argv4_stop_on_error_str.eq_ignore_ascii_case("on")
+                            || argv4_stop_on_error_str.eq_ignore_ascii_case("yes")
+                            || argv4_stop_on_error_str.eq_ignore_ascii_case("y"),
+                    )
+                } else {
+                    None
                 };
                 if let Some(parsed) = stop_on_error_parsed {
                     process_env.stop_on_error.store(parsed, SeqCst);
