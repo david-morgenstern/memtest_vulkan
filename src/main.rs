@@ -1962,23 +1962,20 @@ fn init_running_env() -> ProcessEnv {
                 .as_ref()
                 .and_then(|os_str| os_str.to_str())
             {
-                let stop_on_error_parsed = if matches!(argv4_stop_on_error_str, "0" | "1")
-                    || argv4_stop_on_error_str.eq_ignore_ascii_case("false")
-                    || argv4_stop_on_error_str.eq_ignore_ascii_case("off")
-                    || argv4_stop_on_error_str.eq_ignore_ascii_case("no")
-                    || argv4_stop_on_error_str.eq_ignore_ascii_case("n")
+                let stop_on_error_parsed = if matches!(argv4_stop_on_error_str, "1")
                     || argv4_stop_on_error_str.eq_ignore_ascii_case("true")
                     || argv4_stop_on_error_str.eq_ignore_ascii_case("on")
                     || argv4_stop_on_error_str.eq_ignore_ascii_case("yes")
                     || argv4_stop_on_error_str.eq_ignore_ascii_case("y")
                 {
-                    Some(
-                        matches!(argv4_stop_on_error_str, "1")
-                            || argv4_stop_on_error_str.eq_ignore_ascii_case("true")
-                            || argv4_stop_on_error_str.eq_ignore_ascii_case("on")
-                            || argv4_stop_on_error_str.eq_ignore_ascii_case("yes")
-                            || argv4_stop_on_error_str.eq_ignore_ascii_case("y"),
-                    )
+                    Some(true)
+                } else if matches!(argv4_stop_on_error_str, "0")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("false")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("off")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("no")
+                    || argv4_stop_on_error_str.eq_ignore_ascii_case("n")
+                {
+                    Some(false)
                 } else {
                     None
                 };
